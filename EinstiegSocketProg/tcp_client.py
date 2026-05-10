@@ -2,7 +2,17 @@ import socket
 from protokoll import encode_request, decode_response
 
 client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+# Frage 2: Vor connect noch keine Adresse zugewiesen
+print("Vor connect():", client_sock.getsockname()) 
+
+# Frage 3
+# client_sock.bind(('0.0.0.0', 54321)) # Port 54321 manuell zugewiesen
+
 client_sock.connect(('192.168.137.1', 9000))
+
+# Frage 1/2: Nach connect hat Socket eine echte Adresse
+print("Nach connect():", client_sock.getsockname())  # gibt ('192.168.137.1', 54321) aus
 
 anfragen = [
     (1, 'SUM', [1, 2, 3, 4, 5]),
@@ -17,7 +27,5 @@ for task_id, op, nums in anfragen:
     resp_id, result = decode_response(data)
     print(f"Aufgabe {resp_id}: {op}{nums} = {result}")
 
-
-print(client_sock.getsockname())
 
 client_sock.close()
