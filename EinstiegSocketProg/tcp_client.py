@@ -1,3 +1,4 @@
+import time
 import socket
 from protokoll import encode_request, decode_response
 
@@ -26,9 +27,10 @@ try:
 
     for task_id, op, nums in anfragen:
         client_sock.send(encode_request(task_id, op, nums))
-        data = client_sock.recv(8)  # blockiert bis Antwort ankommt - Timeout greift hier auch
+        data = client_sock.recv(8)
         resp_id, result = decode_response(data)
         print(f"Aufgabe {resp_id}: {op}{nums} = {result}")
+        time.sleep(2)
 
 except socket.timeout:
     # Wird ausgelöst wenn connect() oder recv() nach 3 Sekunden keine Antwort bekommt
