@@ -12,7 +12,7 @@ anfragen = [
 ]
 
 for task_id, op, nums in anfragen:
-    udp_sock.sendto(encode_request(task_id, op, nums), ('127.0.0.1', 9001))
+    udp_sock.sendto(encode_request(task_id, op, nums), ('127.0.0.1', 9000)) # war 9001
     msg, addr = udp_sock.recvfrom(1500)
     resp_id, result = decode_response(msg)
     print(f"Aufgabe {resp_id}: {op}{nums} = {result}")
