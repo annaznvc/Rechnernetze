@@ -2,7 +2,7 @@ import socket
 from protokoll import encode_request, decode_response
 
 client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client_sock.connect(('127.0.0.1', 9000))
+client_sock.connect(('192.168.137.1', 9000))
 
 anfragen = [
     (1, 'SUM', [1, 2, 3, 4, 5]),
@@ -16,5 +16,8 @@ for task_id, op, nums in anfragen:
     data = client_sock.recv(8)
     resp_id, result = decode_response(data)
     print(f"Aufgabe {resp_id}: {op}{nums} = {result}")
+
+
+print(client_sock.getsockname())
 
 client_sock.close()
