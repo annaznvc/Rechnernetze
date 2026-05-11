@@ -5,9 +5,9 @@ import struct
 
 def encode_request(task_id, operation, numbers):
     msg  = struct.pack('!I', task_id)
-    msg += operation.encode('utf-8')
-    msg += struct.pack('!B', len(numbers))
-    for z in numbers:
+    msg += operation.encode('utf-8') # hängt operation als bytes an
+    msg += struct.pack('!B', len(numbers)) #hängt anzahl der zahlen an
+    for z in numbers: #geht durch jede zahl und hängt sie als 4 bytes an
         msg += struct.pack('!i', z)
     return msg
 
