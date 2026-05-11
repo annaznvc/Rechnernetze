@@ -11,7 +11,8 @@ PASSWORD = 'Aif1pigahtuor8'
 
 ABSENDER_SMTP   = 'rnetin15@htwg-konstanz.de' # Kann durch Fakemail ersetzt werden
 ABSENDER_HEADER = 'rnetin15@htwg-konstanz.de' # Kann durch Fakemail ersetzt werden
-EMPFAENGER      = 'rnetin15@htwg-konstanz.de'
+EMPFAENGER      = 'jakob@familie-steiner.net
+'
 
 
 def b64(text):
