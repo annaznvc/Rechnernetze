@@ -1,7 +1,7 @@
 import struct
 
-# Anfrage:  [ID: !I 4B] [OP: UTF-8 3B] [N: !B 1B] [z1..zN: !i je 4B]
-# Antwort:  [ID: !I 4B] [Ergebnis: !i 4B]
+# Anfrage:  [ID: 4B] [OP: UTF-8 3B] [N: 1B] [z1..zN: je 4B]
+# Antwort:  [ID: 4B] [Ergebnis: 4B]
 
 def encode_request(task_id, operation, numbers):
     msg  = struct.pack('!I', task_id)
