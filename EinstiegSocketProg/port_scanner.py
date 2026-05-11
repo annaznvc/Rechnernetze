@@ -1,7 +1,6 @@
 import socket
 import threading
 
-# --- Ziel-Server ---
 TCP_TARGET = '141.37.122.107'
 UDP_TARGET = '141.37.168.26'
 
@@ -9,7 +8,7 @@ PORTS = range(1, 51)
 TIMEOUT = 1.0
 Continue = True
 
-# Ergebnislisten
+
 open_tcp_ports = []
 open_udp_ports = []
 udp_no_response = []
@@ -19,9 +18,8 @@ udp_closed = []
 lock = threading.Lock()
 
 
-# =============================================================================
 # 4.3 Frage 1 & 2: TCP Port Scanner mit Paketsequenz-Infos
-# =============================================================================
+
 
 def scan_tcp(port):
     """
@@ -63,9 +61,7 @@ def scan_tcp(port):
     sock.close()
 
 
-# =============================================================================
 # 4.3 Frage 1 & 2: UDP Port Scanner mit Unterscheidung der drei Faelle
-# =============================================================================
 
 def scan_udp(port):
     """
@@ -107,9 +103,7 @@ def scan_udp(port):
         sock.close()
 
 
-# =============================================================================
 # 4.3 Frage 3: Echo-Test auf Port 7 fuer TCP und UDP
-# =============================================================================
 
 def echo_test():
     """
@@ -153,9 +147,7 @@ def echo_test():
         print(f"  UDP Echo fehlgeschlagen: {e}")
 
 
-# =============================================================================
 # Hauptprogramm
-# =============================================================================
 
 # --- TCP-Scan (Frage 1 & 2) ---
 print(f"Starte TCP-Scan auf {TCP_TARGET}, Ports 1-50 ...")
