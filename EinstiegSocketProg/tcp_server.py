@@ -17,12 +17,11 @@ def receive(conn, addr):
             header = b''
             while len(header) < 8:
                 chunk = conn.recv(8 - len(header))
-                if not chunk:
-                    # Client hat Verbindung geschlossen
+                if not chunk: # leerer chunk = client weg
                     print(f"[Thread] Client {addr} hat getrennt")
                     conn.close()
                     return
-                header += chunk
+                header += chunk #anhängen
 
             n = struct.unpack_from('!B', header, 7)[0]
 
@@ -53,17 +52,17 @@ def listen(sock):
     
     while Continue:
         try:
-            conn, addr = sock.accept()
+            conn, addr = sock.accept() # neuees socket objekt mit adr + port
             print(f"[Server] Neue Verbindung von {addr} – starte Thread")
             # Für jeden Client einen eigenen Thread starten
-            threading.Thread(target=receive, args=(conn, addr), daemon=True).start()
+            threading.Thread(target=receive, args=(conn, addr), daemon=True).start() # welche fkt soll thread ausführen, mit welchen argumenten, stirbt thread automatisch wenn hauptprogramm endet?
         except socket.timeout:
             continue  # kein neuer Client, einfach weiter warten
         except OSError:
             break
 
 
-# --- Hauptprogramm ---
+# Hauptprogramm
 serv_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 serv_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Port sofort wiederverwendbar nach Neustart
 serv_sock.bind(('', 9000))
