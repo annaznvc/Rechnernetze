@@ -75,12 +75,13 @@ def scan_udp(port):
     if not Continue:
         return
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
     sock.settimeout(TIMEOUT)
+    # kein connect wie bei tcp sxanner, weils bei udp schlicht keine verbindugn gibt zum aufbauen, man schickt einfach los
 
     try:
-        sock.sendto(b'Hallo Echo!', (UDP_TARGET, port))
-        antwort, _ = sock.recvfrom(1024)
+        sock.sendto(b'Hallo Echo!', (UDP_TARGET, port)) # bei udp muss man explizit angeben wohin es geht weils keine verbindung gibt
+        antwort, _ = sock.recvfrom(1024) # bei udp muss man explizit angeben, woher es kommt
         # Antwort bekommen -> Port ist offen
         with lock:
             open_udp_ports.append(port)
@@ -91,12 +92,12 @@ def scan_udp(port):
         with lock:
             udp_no_response.append(port)
 
-    except OSError as e:
-        if e.winerror == 10054:
-            # ICMP Port Unreachable -> Port ist definitiv geschlossen
+    except OSError as e: #OSError: Bsys hat Fehler gemeldet. 
+        if e.winerror == 10054: # 10054 = connection reset by peer
+            # Port Unreachable -> Port ist definitiv geschlossen
             with lock:
                 udp_closed.append(port)
-            print(f"  [UDP] Port {port}: geschlossen (ICMP Port Unreachable, Code 10054)")
+            print(f"  [UDP] Port {port}: geschlossen ( Port Unreachable, Code 10054)")
         else:
             print(f"  [UDP] Port {port}: Fehler {e}")
 
@@ -108,11 +109,11 @@ def scan_udp(port):
 
 def echo_test():
     """
-    Testet den RFC-862-konformen Echo-Dienst auf Port 7.
+    Testet den Echo-Dienst auf Port 7.
     Ein echter Echo-Dienst schickt jedes empfangene Byte unveraendert zurueck.
     """
     NACHRICHT = b'Hallo Echo!'
-    print(f"\n{'='*50}")
+    print(f"\n{'='*50}") # String 50 mal wiederholen trennlinie
     print("4.3 Frage 3: Echo-Test auf Port 7")
     print(f"{'='*50}")
 
@@ -136,14 +137,14 @@ def echo_test():
     try:
         udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         udp.settimeout(3.0)
-        udp.sendto(NACHRICHT, (TCP_TARGET, 7))  # gleicher Server, Port 7
+        udp.sendto(NACHRICHT, (TCP_TARGET, 7))
         antwort, addr = udp.recvfrom(1024)
         print(f"  Gesendet : {NACHRICHT}")
         print(f"  Empfangen: {antwort} von {addr}")
         print(f"  Identisch: {NACHRICHT == antwort}")
         udp.close()
     except socket.timeout:
-        print("  UDP Echo: Timeout – Port 7 UDP scheint gefiltert zu sein")
+        print("  UDP Echo: Timeout – keine Antwort")
     except Exception as e:
         print(f"  UDP Echo fehlgeschlagen: {e}")
 
@@ -151,12 +152,12 @@ def echo_test():
 # Hauptprogramm
 
 # --- TCP-Scan (Frage 1 & 2) ---
-print(f"Starte TCP-Scan auf {TCP_TARGET}, Ports 1-50 ...")
-tcp_threads = [threading.Thread(target=scan_tcp, args=(p,)) for p in PORTS]
+print(f"Starte TCP-Scan auf {TCP_TARGET}, Ports 1-50 ...") # für jedne thread ne liste erstellen
+tcp_threads = [threading.Thread(target=scan_tcp, args=(p,)) for p in PORTS] # list comprehension, komakte Art ne liste zu erstellen. Komma in args damit python es als tupel erkennt
 for t in tcp_threads:
     t.start()
 for t in tcp_threads:
-    t.join()
+    t.join() # hauptprogramm wartet bus alle threads fertig sind
 
 # --- UDP-Scan (Frage 1 & 2) ---
 print(f"\nStarte UDP-Scan auf {UDP_TARGET}, Ports 1-50 ...")
