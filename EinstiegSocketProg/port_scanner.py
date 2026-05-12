@@ -56,7 +56,8 @@ def scan_tcp(port):
 
     else:
         # Timeout oder anderer Fehler -> Port gefiltert oder kein Server
-        pass  # print(f"  [TCP] Port {port}: Timeout/gefiltert (Code {result})")
+        pass  
+        # print(f"  [TCP] Port {port}: Timeout/gefiltert (Code {result})")
 
     sock.close()
 
