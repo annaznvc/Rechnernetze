@@ -35,8 +35,8 @@ Protokoll = ==TCP==
 - X Anz Neu
 	- Listeneintrag: 
 		- Nickname -> 32 byte
-		- port 
-		- ip
+		- port ->  2 byte
+		- ip -> 4 byte
 - Y Anz Abgemeldet
 	-  Listeneintrag: 
 		- Nickname -> 32 byte
