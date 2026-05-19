@@ -48,8 +48,8 @@ Protokoll = ==TCP==
 ### Antwort (Server an Clients)
 - message type -> 1 Byte
 - errorcode -> 1 Byte
-- Nachricht -> 256
 - Nickname Sender -> 32
+- Nachricht -> 256
 # Client-Client Protokoll
 ***message type***
 - 4 Aufbau TCP
