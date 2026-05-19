@@ -66,4 +66,5 @@ Protokoll : ==UDP==
 - offener TCP-Port -> 2 byte
 ## Message 
 Protokull ==TCP==
+- message type -> 1 Byte
 - Message -> 256 bytes
