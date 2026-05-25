@@ -7,12 +7,15 @@ name = ""
 aktive_users = []
 
 def register():
+    global ip, port, name
     ip = input("IP z.B. 192.168.1.50: ")
     port = int(input("Port: "))
     name = input("Name: ")
     message = util.encode_register(ip, port, name)
     print(message)
     print(util.decode_register(message))
+    response = mock.mock_register_response()
+    return response
 
 def logout():
     #TODO
@@ -28,8 +31,11 @@ def send_message():
     pass
 
 def update():
-    util.encode_update(ip,port)
-    return mock.mock_update_response()
+    global ip, port
+    message = util.encode_update(ip,port)
+    response = mock.mock_update_response()
+    print("Aktive users: " + response)
+    return response
 
 message_type = 0
 while(message_type != -1):

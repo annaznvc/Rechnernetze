@@ -15,11 +15,11 @@ def encode_package(message):
 #---register---
 #encode register
 def decode_register(message):
-    message_type, IP, Port, Name = struct.unpack('!B4sH32s', message)
+    message_type, ip, port, name = struct.unpack('!B4sH32s', message)
     message_type_int = int(message_type)
-    IP_str = socket.inet_ntoa(IP)
-    name_str = Name.decode("utf-8").rstrip('\x00')
-    return message_type_int, IP_str, Port, name_str
+    IP_str = socket.inet_ntoa(ip)
+    name_str = name.decode("utf-8").rstrip('\x00')
+    return message_type_int, IP_str, port, name_str
 
 #decode register
 def encode_register(IP, port, name):
@@ -41,8 +41,9 @@ def decode_logout(message):
 
 #---update---
 #encode update
-def encode_update(IP, port):
-    ip_bytes = socket.inet_aton(IP)  # "192.168.1.50" -> b'\xc0\xa8\x012'
+def encode_update(ip, port):
+    print("ipadress ist:" + ip)
+    ip_bytes = socket.inet_aton(ip)  # "192.168.1.50" -> b'\xc0\xa8\x012'
     return struct.pack('!B4sH', 0, ip_bytes, port)
 
 #decode update
