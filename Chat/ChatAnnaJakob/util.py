@@ -28,6 +28,9 @@ def decode_package_server_resonse(message):
         case 2:
             return decode_update_response(message)
 
+def decode_message_type(message):
+    message_type = struct.unpack('!b', message[:1])[0]
+    return message_type
 
 #---register---
 #encode register

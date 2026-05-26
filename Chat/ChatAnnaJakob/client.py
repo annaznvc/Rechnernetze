@@ -2,12 +2,20 @@ import util
 import mock
 import threading
 import time
+import socket
 
 ip = ""
 port = 0
 name = ""
 aktive_users = []
 message_type = 0
+
+#Connections
+active_tcp_con_server = None
+active_tcp_con_client = None
+active_udp_con_client = None
+
+# TODO init tcp connection to server
 
 def show_usrs():
     print(" aktive users:")
@@ -25,6 +33,12 @@ def update_usrlist(login_usrs, logout_usrs):
     for usr in login_usrs:
         if not aktive_users.contains(usr):
             aktive_users.append(usr)
+
+def finde_usr_by_name(name):
+    for usr in aktive_users:
+        if usr.name == name:
+            return usr
+    return None
 
 def register():
     global ip, port, name
@@ -44,11 +58,27 @@ def logout():
 
 def tcp():
     global name, port
+
+    nickname_chatpartner = input("enter the nickname of the chatpartner: ")
+    usr_chatpartner = finde_usr_by_name(nickname_chatpartner)
+    if usr_chatpartner == None
+        return print("User not found")
+
     #TODO anfrage integrieren
-    
+    response = mock.mock_tcp_response()
+    message_type, err_code, open_tcp_port = util.decode_tcp_response(response)
+    if err_code not in [0, 1]:
+        print("Fehler bei TCP Anfrage")
+    elif err_code == 0:
+        print("TCP Anfrage erfolgreich, offene Ports: " + str(open_tcp_port))
+    elif err_code == 1:
+        print("Fehler bei TCP Anfrage, Port nicht offen")
 
 def send_message():
-    #TODO
+    #TODO message senden implementieren
+    #Check tcp connection
+    #Init udp
+    #send message
     pass
 
 def update(delay):
