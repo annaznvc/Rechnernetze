@@ -174,7 +174,7 @@ def listen_for_p2p_udp(udp_port):
             print(f"Fehler im UDP-Listener: {e}")
 
 # P2P Verbindung aktiv initiieren
-def initiate_p2p(target_ip, target_udp_port):
+def initiate_p2p(target_ip, target_udp_port, target_name="Peer"):
     # Erstelle einen temporären TCP-Socket
     temp_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     temp_tcp.bind(("0.0.0.0", 0))
@@ -188,20 +188,21 @@ def initiate_p2p(target_ip, target_udp_port):
     print(f"UDP-Anfrage an {target_ip}:{target_udp_port} gesendet. Warte auf TCP-Verbindung...")
     
     # Partner sollte sich jetzt via TCP melden
-    temp_tcp.settimeout(5.0)
+    temp_tcp.settimeout(8.0)
     try:
         peer_sock, addr = temp_tcp.accept()
-        print(f"P2P TCP-Verbindung erfolgreich hergestellt!")
-        
+        print(f"P2P TCP-Verbindung erfolgreich hergestellt mit {target_name}!")
+
         # In Sessions speichern
-        p2p_sessions["Target"] = peer_sock
-        t = threading.Thread(target=receive_p2p_messages, args=(peer_sock, "Target"))
+        p2p_sessions[target_name] = peer_sock
+        t = threading.Thread(target=receive_p2p_messages, args=(peer_sock, target_name))
         t.daemon = True
         t.start()
     except socket.timeout:
         print("Timeout: Partner hat keine TCP-Verbindung aufgebaut.")
     finally:
         temp_tcp.close()
+        udp_client.close()
 
 # Hauptprogramm
 def main():
@@ -263,18 +264,34 @@ def main():
             server_tcp.sendall(packet)
             
         elif cmd.startswith("/p2p "):
-            parts = cmd.split() #zerlegt Text an den Leerzeichen in eine Liste: zb ['/p2p', '192.168.1.50', '60002']
-            if len(parts) == 3: #drei Argumente übergeben?
-                initiate_p2p(parts[1], int(parts[2])) #übergibt IP und port 
-                
+            parts = cmd.split()
+            if len(parts) == 3:
+                initiate_p2p(parts[1], int(parts[2]))
+            elif len(parts) == 4:
+                # /p2p <ip> <udp_port> <name>
+                initiate_p2p(parts[1], int(parts[2]), parts[3])
+
         elif cmd.startswith("/msg "):
             msg_text = cmd[5:]
-            if "Target" in p2p_sessions: #P2P-TCP-Verbindung zu Partner  in Speicher?
-                # Chat Nachricht senden (Type 5)
-                packet = struct.pack("!B256s", 5, pad_string(msg_text, 256)) #5 Message Type für P2P Nachrichten(1B), 256B nachricht
-                p2p_sessions["Target"].sendall(packet) #Nachricht wird über den Direkt-Socket gesendet
+            if p2p_sessions:
+                # An die erste (oder einzige) aktive Session senden
+                target_name = list(p2p_sessions.keys())[0]
+                packet = struct.pack("!B256s", 5, pad_string(msg_text, 256))
+                try:
+                    p2p_sessions[target_name].sendall(packet)
+                except Exception as e:
+                    print(f"Senden fehlgeschlagen: {e}")
+                    del p2p_sessions[target_name]
             else:
                 print(" Keine aktive P2P-Session vorhanden. Nutze erst /p2p")
+
+        elif cmd.startswith("/sessions"):
+            if p2p_sessions:
+                print("Aktive P2P-Sessions:")
+                for name in p2p_sessions:
+                    print(f"  - {name}")
+            else:
+                print("Keine aktiven Sessions.")
 
 if __name__ == "__main__":
     main()
