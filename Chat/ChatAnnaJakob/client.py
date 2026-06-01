@@ -3,6 +3,7 @@ import threading
 import time
 import socket
 import struct
+import queue
 
 ip = ""
 port = 0
@@ -19,6 +20,7 @@ active_udp_con_client = None
 local_tcp_listen_port = 0
 tcp_listener_socket = None
 client_running = True
+udp_setup_response_queue = queue.Queue()
 chat_receiver_thread = None
 
 
@@ -94,6 +96,16 @@ def udp_listener():
         if msg_type != 4:
             continue
 
+        # Typ 4 wird fuer Request (35 Byte) und Response (4 Byte) verwendet.
+        # Response-Pakete muessen an tcp() weitergereicht werden.
+        if len(data) == 4:
+            udp_setup_response_queue.put((data, addr))
+            continue
+
+        if len(data) != 35:
+            print(f"Ignoriere ungueltiges TCP-Setup Paket mit Laenge {len(data)} von {addr[0]}:{addr[1]}")
+            continue
+
         _, sender_name, sender_tcp_port = util.decode_tcp(data)
         print(f"TCP-Setup von {sender_name} ({addr[0]}:{addr[1]}), Ziel-TCP-Port {sender_tcp_port}")
 
@@ -113,10 +125,8 @@ def udp_listener():
 
 def start_chat_receiver():
     global chat_receiver_thread
-
     if active_tcp_con_client is None:
         return
-
     if chat_receiver_thread is not None and chat_receiver_thread.is_alive():
         return
 
@@ -204,59 +214,6 @@ def recv_update_response(conn):
 
     return header + login_bytes + logout_count_raw + logout_bytes
 
-
-def recv_server_message(conn):
-    first = recv_exact(conn, 1)
-    if first is None:
-        return None
-
-    msg_type = struct.unpack('!B', first)[0]
-
-    if msg_type == 2:
-        base = recv_exact(conn, 5)
-        if base is None:
-            return None
-
-        _, _, login_count = struct.unpack('!BBI', first + base)
-        login_bytes = recv_exact(conn, login_count * 38)
-        if login_bytes is None:
-            return None
-
-        logout_count_raw = recv_exact(conn, 4)
-        if logout_count_raw is None:
-            return None
-        logout_count = struct.unpack('!I', logout_count_raw)[0]
-
-        logout_bytes = recv_exact(conn, logout_count * 38)
-        if logout_bytes is None:
-            return None
-
-        return first + base + login_bytes + logout_count_raw + logout_bytes
-
-    if msg_type == 3:
-        rest = recv_exact(conn, 289)
-        if rest is None:
-            return None
-        return first + rest
-
-    if msg_type in [1, 255]:
-        rest = recv_exact(conn, 1)
-        if rest is None:
-            return None
-        return first + rest
-
-    if msg_type == 0:
-        base = recv_exact(conn, 5)
-        if base is None:
-            return None
-        _, _, user_count = struct.unpack('!BBI', first + base)
-        user_bytes = recv_exact(conn, user_count * 38)
-        if user_bytes is None:
-            return None
-        return first + base + user_bytes
-
-    return None
-
 def register():
     global ip, port, name, local_tcp_listen_port
     server_ip = input("Server IP z.B. 127.0.0.1: ")
@@ -327,9 +284,21 @@ def tcp():
     # Sende TCP-Setup Anfrage via UDP an den richtigen UDP-Port des Partners.
     request = util.encode_tcp(name, local_tcp_listen_port)
     try:
+        # Alte Responses verwerfen, damit kein veraltetes Paket verarbeitet wird.
+        while True:
+            udp_setup_response_queue.get_nowait()
+    except queue.Empty:
+        pass
+
+    try:
         active_udp_con_client.sendto(request, (partner_ip, partner_udp_port))
-        response, _ = active_udp_con_client.recvfrom(64)
+        response, response_addr = udp_setup_response_queue.get(timeout=2.5)
+        if response_addr[0] != partner_ip:
+            print(f"Warnung: TCP-Setup Antwort kam von {response_addr[0]} statt {partner_ip}")
     except socket.timeout:
+        print("Keine TCP-Setup Antwort vom Partner erhalten (UDP Timeout)")
+        return
+    except queue.Empty:
         print("Keine TCP-Setup Antwort vom Partner erhalten (UDP Timeout)")
         return
     except OSError as e:
@@ -356,26 +325,10 @@ def send_message():
 
     text = input("Nachricht an Peer (max 256): ")
     packet = util.encode_message(text)
-
     try:
         active_tcp_con_client.sendall(packet)
     except OSError as e:
         print("Senden an Peer fehlgeschlagen:", e)
-
-
-def broadcast():
-    if not name:
-        print("Nicht registriert.")
-        return
-
-    text = input("Broadcast Nachricht (max 256): ")
-    packet = util.encode_broadcast_request(name, text)
-
-    try:
-        active_tcp_con_server.sendall(packet)
-        print("Broadcast gesendet.")
-    except OSError as e:
-        print("Broadcast fehlgeschlagen:", e)
 
 def update(delay):
     global ip, port
@@ -387,28 +340,21 @@ def update(delay):
         try:
             message = util.encode_update(ip, port)
             active_tcp_con_server.sendall(message)
-
-            while client_running:
-                response = recv_server_message(active_tcp_con_server)
-                if response is None:
-                    print("Keine/Unvollstaendige Server-Antwort")
-                    break
-
-                server_msg_type = util.decode_message_type(response)
-
-                if server_msg_type == 2:
-                    _, err_code, login_usrs, logout_usrs = util.decode_update_response(response)
-                    if err_code == 0:
-                        update_usrlist(login_usrs, logout_usrs)
-                    break
-
-                if server_msg_type == 3:
-                    _, _, sender_name, b_msg = util.decode_broadcast_response(response)
-                    print(f"\n[Broadcast von {sender_name}] {b_msg}")
-                    continue
-
-                # z.B. Error/Logout/Register-Antworten ignorieren und weiter lesen
+            response = recv_update_response(active_tcp_con_server)
+            if response is None:
+                print("Keine/Unvollstaendige Update-Antwort vom Server")
+                time.sleep(delay)
                 continue
+
+            decoded = util.decode_package_server_resonse(response)
+            if decoded is None:
+                print("Update-Antwort konnte nicht geparst werden")
+                time.sleep(delay)
+                continue
+
+            message_type, err_code, login_usrs, logout_usrs = decoded
+            if err_code == 0:
+                update_usrlist(login_usrs, logout_usrs)
         except (socket.timeout, OSError) as e:
             if client_running:
                 print("Update fehlgeschlagen:", e)
@@ -418,7 +364,7 @@ def update(delay):
 
 def read_input():
     while client_running:
-        action_type = int(input("Trigger action (0: register, 1: logout, 2:Aufbau TCP, 3:send Message, 4:show aktive users, 5:broadcast): "))
+        action_type = int(input("Trigger action (0: register, 1: logout, 2:Aufbau TCP, 3:send Message, 4:show aktive users): "))
         match action_type:
             case 0:
                 register()
@@ -431,8 +377,6 @@ def read_input():
                 send_message()
             case 4:
                 show_usrs()
-            case 5:
-                broadcast()
             case 99:
                 print("update")
                 update(10)
