@@ -15,16 +15,27 @@ SERVER_PORT = 50000
 active_clients = {}
 clients_lock = threading.Lock() # mutex, da viele Client-Threads gleichzeitig auf active_clients zugreifen, verhindert Lock Race Condition
 
-def broadcast_message(sender_socket, sender_nickname, message_bytes): #Sendet eine Broadcast-Nachricht (Type 3) an alle registrierten Clients
-    with clients_lock: #lock es darf kein anderer Thread die Liste der aktiven Clients verändern
-        # Vorbereiten der Server-Antwort für Broadcast (Type 3(1B), Error 0 (1B), Nickname(32B), Message(256B)) = 290 Bytes
+def recv_exact(sock, size):
+    """Liest exakt size Bytes vom Socket."""
+    data = b''
+    while len(data) < size:
+        chunk = sock.recv(size - len(data))
+        if not chunk:
+            return None
+        data += chunk
+    return data
+
+def broadcast_message(sender_socket, sender_nickname, message_bytes):
+    with clients_lock:
         fmt = "!BB32s256s"
         packed_msg = struct.pack(fmt, 3, 0, pad_string(sender_nickname, 32), message_bytes)
         
-        for c_socket in list(active_clients.keys()): #geht alle sockets aus telefonbucg durch
+        for c_socket in list(active_clients.keys()):
+            if c_socket is sender_socket:
+                continue  # Nicht an Sender selbst
             try:
-                c_socket.sendall(packed_msg) #sendet 290Byte Paket an akt client in der liste
-            except Exception: # Verbindung abgebrochen -> Client entfernen
+                c_socket.sendall(packed_msg)
+            except Exception:
                 remove_client(c_socket)
 
 def remove_client(client_socket): #Entfernt einen Client aus der Liste
@@ -39,17 +50,17 @@ def handle_client(client_socket, client_address): # Verarbeitet die eingehenden 
     
     try:
         while True:
-            # Erster Schritt: Message Type (1 Byte) lesen, um die Länge zu bestimmen
-            type_byte = client_socket.recv(1)
+            type_byte = recv_exact(client_socket, 1)
             if not type_byte:
                 break
             
             msg_type = type_byte[0]
             
-            #Registrierung (Type 0)
+            # Registrierung (Type 0)
             if msg_type == 0:
-                # Restliche 38 Bytes lesen (4B IP, 2B Port, 32B Name)
-                data = client_socket.recv(38)
+                data = recv_exact(client_socket, 38)
+                if not data:
+                    break
                 fmt = "!4sH32s"
                 raw_ip, udp_port, raw_name = struct.unpack(fmt, data)
                 
@@ -79,18 +90,62 @@ def handle_client(client_socket, client_address): # Verarbeitet die eingehenden 
                                                    pad_string(info["nickname"], 32))
                         client_socket.sendall(packed_entry)
             
-            #Broadcast (Type 3)
+            # Logout (Type 1) - 32B Nickname
+            elif msg_type == 1:
+                data = recv_exact(client_socket, 32)
+                if not data:
+                    break
+                raw_name = struct.unpack("!32s", data)[0]
+                nickname = unpad_string(raw_name)
+                print(f"Logout: {nickname}")
+
+                with clients_lock:
+                    if client_socket in active_clients:
+                        del active_clients[client_socket]
+
+                # Logout-Response: Type 1, Error 0
+                client_socket.sendall(struct.pack("!BB", 1, 0))
+
+            # Update (Type 2) - 4B IP + 2B Port = 6 Bytes
+            elif msg_type == 2:
+                data = recv_exact(client_socket, 6)
+                if not data:
+                    break
+                # Antwort: aktuelle Userliste als Update-Response
+                # Format: Type 2, Error 0, N_login (4B), N*38B login-entries, N_logout (4B), 0 logout-entries
+                with clients_lock:
+                    entries = []
+                    for info in active_clients.values():
+                        entries.append(struct.pack("!4sH32s",
+                                                   socket.inet_aton(info["ip"]),
+                                                   info["udp_port"],
+                                                   pad_string(info["nickname"], 32)))
+                    n_login = len(entries)
+
+                response = struct.pack("!BBI", 2, 0, n_login)
+                response += b''.join(entries)
+                response += struct.pack("!I", 0)  # 0 logouts
+                client_socket.sendall(response)
+
+            # Broadcast (Type 3) - 32B Name + 256B Nachricht = 288 Bytes
             elif msg_type == 3:
-                # Restliche 288 Bytes lesen (32B Name, 256B Nachricht)
-                data = client_socket.recv(288)
+                data = recv_exact(client_socket, 288)
+                if not data:
+                    break
                 raw_name, raw_msg = struct.unpack("!32s256s", data)
                 
                 nickname = unpad_string(raw_name)
                 print(f"Broadcast von {nickname}")
                 
-                # An alle weiterleiten
                 broadcast_message(client_socket, nickname, raw_msg)
                 
+                # Error-Ack an Sender (wie ChatAnnaJakob-Server)
+                client_socket.sendall(struct.pack("!BB", 255, 0))
+
+            else:
+                print(f"Unbekannter Message-Type {msg_type} von {client_address}")
+                break
+
     except Exception as e:
         print(f"[Error] Fehler beim Verarbeiten von {client_address}: {e}")
     finally:
