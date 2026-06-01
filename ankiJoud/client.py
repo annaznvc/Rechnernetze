@@ -267,7 +267,7 @@ def main():
     
     # 4. Benutzerschleife für Eingaben
     time.sleep(1)
-    print("\nBefehle:\n/b <text>  -> Broadcast senden\n/p2p <ip> <udp_port> -> P2P Session starten\n/update -> Benutzerliste aktualisieren\n/msg <text> -> Nachricht an P2P-Partner senden\n")
+    print("\nBefehle:\n/b <text>  -> Broadcast senden\n/p2p <ip> <udp_port> -> P2P Session starten\n/update -> Benutzerliste aktualisieren\n/msg <text> -> Nachricht an P2P-Partner senden\n/quit -> Chat beenden & ausloggen\n")
     
     while True:
         cmd = input("> ")
@@ -295,6 +295,24 @@ def main():
                 print("Update-Anfrage an Server gesendet...")
             except Exception as e:
                 print(f"Fehler beim Senden der Update-Anfrage: {e}")
+
+        elif cmd.strip() == "/quit":
+            print("Melde vom Server ab...")
+            # 1. Paket packen: Typ 1 (1 Byte) + Eigener Nickname (32 Bytes) = 33 Bytes Payload
+            packet = struct.pack("!B32s", 1, pad_string(MY_NICKNAME, 32))
+            try:
+                server_tcp.sendall(packet)
+                
+                # Kurze Pause, damit der Hintergrund-Thread 'receive_from_server' 
+                # die Antwort (Typ 1) noch in Ruhe empfangen und verarbeiten kann
+                time.sleep(0.5) 
+            except Exception as e:
+                print(f"Fehler beim sauberen Abmelden: {e}")
+            
+            # 2. Sockets schließen und Programm beenden
+            server_tcp.close()
+            print("Programm beendet. Tschüss!")
+            sys.exit(0)
 
         elif cmd.startswith("/msg "):
             msg_text = cmd[5:]
