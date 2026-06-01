@@ -111,6 +111,9 @@ def handle_client(client_socket, client_address): # Verarbeitet die eingehenden 
                 data = recv_exact(client_socket, 6)
                 if not data:
                     break
+                
+                print(f"Update-Anfrage erhalten von {client_address}")
+                
                 # Antwort: aktuelle Userliste als Update-Response
                 # Format: Type 2, Error 0, N_login (4B), N*38B login-entries, N_logout (4B), 0 logout-entries
                 with clients_lock:
@@ -139,7 +142,7 @@ def handle_client(client_socket, client_address): # Verarbeitet die eingehenden 
                 
                 broadcast_message(client_socket, nickname, raw_msg)
                 
-                # Error-Ack an Sender (wie ChatAnnaJakob-Server)
+                # Error-Ack an Sender 
                 client_socket.sendall(struct.pack("!BB", 255, 0))
 
             else:

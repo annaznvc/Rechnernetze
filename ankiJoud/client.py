@@ -55,15 +55,29 @@ def receive_from_server(tcp_socket):
                         recv_exact_raw(tcp_socket, count * 38)
 
             elif msg_type == 2:
-                # Update-Response: 1B err + 4B login_count + login_count*38 + 4B logout_count + logout_count*38
+                # Update-Response: 1B err + 4B login_count
                 rest = recv_exact_raw(tcp_socket, 5)
                 if rest:
-                    _, login_count = struct.unpack("!BI", rest)
-                    recv_exact_raw(tcp_socket, login_count * 38)
+                    error_code, login_count = struct.unpack("!BI", rest)
+                    print(f"\n[UPDATE] Erhalten! Aktive Nutzer auf dem Server ({login_count}):")
+                    
+                    # Die angemeldeten User einlesen und ausgeben
+                    for _ in range(login_count):
+                        user_data = recv_exact_raw(tcp_socket, 38) # 4B IP + 2B Port + 32B Name
+                        if user_data:
+                            raw_ip, u_port, raw_name = struct.unpack("!4sH32s", user_data)
+                            u_name = unpad_string(raw_name)
+                            u_ip = socket.inet_ntoa(raw_ip)
+                            print(f" -> User: {u_name} | IP: {u_ip} | UDP-Port: {u_port}")
+                    
+                    # Danach kommen laut Server-Protokoll noch 4 Bytes für logout_count
                     lc_raw = recv_exact_raw(tcp_socket, 4)
                     if lc_raw:
                         logout_count = struct.unpack("!I", lc_raw)[0]
-                        recv_exact_raw(tcp_socket, logout_count * 38)
+                        # Da dein Server fest "0 logout-entries" schickt, lesen wir hier count * 38 (was 0 ist)
+                        if logout_count > 0:
+                            recv_exact_raw(tcp_socket, logout_count * 38)
+                    print("> ", end="")
 
             elif msg_type == 1:
                 # Logout-Response: 1B errcode
@@ -253,7 +267,7 @@ def main():
     
     # 4. Benutzerschleife für Eingaben
     time.sleep(1)
-    print("\nBefehle:\n/b <text>  -> Broadcast senden\n/p2p <ip> <udp_port> -> P2P Session starten\n/msg <text> -> Nachricht an P2P-Partner senden\n")
+    print("\nBefehle:\n/b <text>  -> Broadcast senden\n/p2p <ip> <udp_port> -> P2P Session starten\n/update -> Benutzerliste aktualisieren\n/msg <text> -> Nachricht an P2P-Partner senden\n")
     
     while True:
         cmd = input("> ")
@@ -270,6 +284,17 @@ def main():
             elif len(parts) == 4:
                 # /p2p <ip> <udp_port> <name>
                 initiate_p2p(parts[1], int(parts[2]), parts[3])
+
+        elif cmd.strip() == "/update":
+            # Update anfordern (Type 2)
+            # Der Server erwartet nach dem Typ-Byte noch 4B IP + 2B Port = 6 Bytes Daten
+            packed_ip = socket.inet_aton(MY_IP)
+            packet = struct.pack("!B4sH", 2, packed_ip, MY_UDP_PORT)
+            try:
+                server_tcp.sendall(packet)
+                print("Update-Anfrage an Server gesendet...")
+            except Exception as e:
+                print(f"Fehler beim Senden der Update-Anfrage: {e}")
 
         elif cmd.startswith("/msg "):
             msg_text = cmd[5:]
