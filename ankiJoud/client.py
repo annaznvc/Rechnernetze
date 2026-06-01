@@ -13,7 +13,7 @@ from protocol_helpers import pad_string, unpad_string
 # Globale Variablen für den eigenen Zustand
 MY_NICKNAME = ""
 MY_UDP_PORT = 0
-MY_IP = "127.0.0.1" # 127.0.0.1 zum lokal testen (Loopback-Adapter), sonst MeshNet/Echt-IP !!
+MY_IP = "127.0.0.1"
 SERVER_IP = "127.0.0.1"
 SERVER_PORT = 50000
 
@@ -27,21 +27,68 @@ def receive_from_server(tcp_socket):
             type_byte = tcp_socket.recv(1)
             if not type_byte:
                 break
-            msg_type = type_byte[0] #liest das erste Byte, um zu identifizieren (msg_type)
-            
+            msg_type = type_byte[0]
+
             # Broadcast erhalten wenn type 3
             if msg_type == 3:
                 # 1B Error, 32B Sender, 256B Nachricht = 289 Bytes
-                data = tcp_socket.recv(289)
+                data = recv_exact_raw(tcp_socket, 289)
+                if not data:
+                    break
                 error, raw_sender, raw_msg = struct.unpack("!B32s256s", data)
                 
                 sender = unpad_string(raw_sender)
                 msg = unpad_string(raw_msg)
                 print(f"\n[BROADCAST] {sender}: {msg}\n> ", end="")
+
+            # Error-Ack vom Server (z.B. nach eigenem Broadcast) - 1 Byte Errorcode konsumieren
+            elif msg_type == 255 or msg_type == 0:
+                # Typ 255: Error-Response (1B errcode)
+                # Typ 0: Register-Response (1B errcode + 4B N + N*38B) - ignorieren
+                if msg_type == 255:
+                    tcp_socket.recv(1)  # errcode konsumieren
+                else:
+                    # Falls unerwartet eine Register-Response kommt, Header lesen und verwerfen
+                    rest = recv_exact_raw(tcp_socket, 5)  # 1B err + 4B count
+                    if rest:
+                        _, count = struct.unpack("!BI", rest)
+                        recv_exact_raw(tcp_socket, count * 38)
+
+            elif msg_type == 2:
+                # Update-Response: 1B err + 4B login_count + login_count*38 + 4B logout_count + logout_count*38
+                rest = recv_exact_raw(tcp_socket, 5)
+                if rest:
+                    _, login_count = struct.unpack("!BI", rest)
+                    recv_exact_raw(tcp_socket, login_count * 38)
+                    lc_raw = recv_exact_raw(tcp_socket, 4)
+                    if lc_raw:
+                        logout_count = struct.unpack("!I", lc_raw)[0]
+                        recv_exact_raw(tcp_socket, logout_count * 38)
+
+            elif msg_type == 1:
+                # Logout-Response: 1B errcode
+                tcp_socket.recv(1)
+
+            else:
+                # Unbekannter Typ - 1 Byte konsumieren um nicht zu desyncen
+                pass
+
     except Exception as e:
         print(f"\n Verbindung zum Server verloren: {e}")
     finally:
         tcp_socket.close()
+
+
+def recv_exact_raw(sock, size):
+    """Liest exakt size Bytes vom Socket."""
+    data = b''
+    while len(data) < size:
+        chunk = sock.recv(size - len(data))
+        if not chunk:
+            return None
+        data += chunk
+    return data
+
 
 # Thread2: Empfang von P2P-Nachrichten (TCP)
 def receive_p2p_messages(peer_socket, peer_name):
@@ -158,13 +205,14 @@ def initiate_p2p(target_ip, target_udp_port):
 
 # Hauptprogramm
 def main():
-    global MY_NICKNAME, MY_UDP_PORT, MY_IP, SERVER_IP #muss global, da anderen Threads (UDP-Thread) später auch darauf zugreifen können
-    
+    global MY_NICKNAME, MY_UDP_PORT, MY_IP, SERVER_IP, SERVER_PORT
+
     MY_NICKNAME = input("Nickname eingeben: ")
     MY_UDP_PORT = int(input("Eigener UDP-Port: "))
     MY_IP = input("Eigene IP (testen 127.0.0.1): ")
     SERVER_IP = input("Server IP (testen 127.0.0.1): ")
-    
+    SERVER_PORT = int(input("Server Port (50000 oder 9001): "))
+
     # 1. UDP-Listener Thread starten
     udp_thread = threading.Thread(target=listen_for_p2p_udp, args=(MY_UDP_PORT,))
     udp_thread.daemon = True # Hintergrund Thread (hat kein Eigenleben, sobald Hauptprogramm schließt oder Strg + C , killt alle Daemon-Threads sofort und automatisch mit
