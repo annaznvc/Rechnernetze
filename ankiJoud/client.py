@@ -1,0 +1,232 @@
+import socket
+import threading
+import struct
+import sys
+import time
+from protocol_helpers import pad_string, unpad_string
+
+#Der Client muss drei Dinge gleichzeitig tun -> Threads nutzen:
+# Vom Server (TCP) Nachrichten empfangen (Broadcasts).  
+# Auf dem UDP-Port lauschen, falls ein anderer Client eine P2P-Session aufbauen will (Type 4).  
+# Benutzereingaben über die Konsole entgegennehmen.
+
+# Globale Variablen für den eigenen Zustand
+MY_NICKNAME = ""
+MY_UDP_PORT = 0
+MY_IP = "127.0.0.1" # 127.0.0.1 zum lokal testen (Loopback-Adapter), sonst MeshNet/Echt-IP !!
+SERVER_IP = "127.0.0.1"
+SERVER_PORT = 50000
+
+# Speichert offene P2P-TCP-Verbindungen zu anderen Clients: { nickname: socket } ("Telefonbuch")
+p2p_sessions = {}
+
+# Thread1: Empfang vom Server (TCP)
+def receive_from_server(tcp_socket):
+    try:
+        while True:
+            type_byte = tcp_socket.recv(1)
+            if not type_byte:
+                break
+            msg_type = type_byte[0] #liest das erste Byte, um zu identifizieren (msg_type)
+            
+            # Broadcast erhalten wenn type 3
+            if msg_type == 3:
+                # 1B Error, 32B Sender, 256B Nachricht = 289 Bytes
+                data = tcp_socket.recv(289)
+                error, raw_sender, raw_msg = struct.unpack("!B32s256s", data)
+                
+                sender = unpad_string(raw_sender)
+                msg = unpad_string(raw_msg)
+                print(f"\n[BROADCAST] {sender}: {msg}\n> ", end="")
+    except Exception as e:
+        print(f"\n Verbindung zum Server verloren: {e}")
+    finally:
+        tcp_socket.close()
+
+# Thread2: Empfang von P2P-Nachrichten (TCP)
+def receive_p2p_messages(peer_socket, peer_name):
+    try:
+        while True:
+            type_byte = peer_socket.recv(1)
+            if not type_byte:
+                break
+            msg_type = type_byte[0]
+            
+            if msg_type == 5:  # Chat Message wenn type 5
+                raw_msg = peer_socket.recv(256)
+                msg = unpad_string(raw_msg)
+                print(f"\n[P2P] {peer_name}: {msg}\n> ", end="")
+    except Exception:
+        pass
+    finally:
+        print(f"\nP2P-Session mit {peer_name} beendet.")
+        if peer_name in p2p_sessions:
+            del p2p_sessions[peer_name]
+        peer_socket.close()
+
+# Thread3: Auf eingehende P2P-Anfragen warten (UDP & TCP-Accept)
+def listen_for_p2p_udp(udp_port):
+    udp_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) #neuen Socket für den Verbindungsaufbau
+    udp_server.bind(("0.0.0.0", udp_port)) #bindet den UDP-Socket an die IP 0.0.0.0
+    
+    # erstellen direkt einen TCP-Socket, um Verbindungen anzunehmen, falls Peer Partner
+    tcp_p2p_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    tcp_p2p_server.bind(("0.0.0.0", 0)) # 0: Beliebigen freien TCP-Port wählen
+    tcp_p2p_server.listen(5) #maximal 5 Verbindungsanfragen gleichzeitig
+    assigned_tcp_port = tcp_p2p_server.getsockname()[1]
+
+    print(f"Lausche auf UDP-Port {udp_port} für P2P-Anfragen...")
+    
+    def accept_tcp_connections():
+        while True:
+            try:
+                peer_sock, addr = tcp_p2p_server.accept()
+                # Sobald die Verbindung steht, herausfinden, wer es ist.
+                t = threading.Thread(target=receive_p2p_messages, args=(peer_sock, f"Peer@{addr[0]}"))
+                t.daemon = True
+                t.start()
+            except Exception:
+                break
+
+    threading.Thread(target=accept_tcp_connections, daemon=True).start()
+
+    while True:
+        try:
+            # Auf UDP-Paket warten (Type 4)
+            data, addr = udp_server.recvfrom(35) # 1B Type, 32B Name, 2B Port
+            if len(data) < 35: continue #fehlerhaft oder unvollständig? wird paket übersprungen
+            
+            msg_type = data[0]
+            if msg_type == 4: #type 4 Aufbau einer TCP-Verbindung
+                raw_name, peer_tcp_port = struct.unpack("!32sH", data[1:])
+                peer_name = unpad_string(raw_name) #Nullbytes entfernt und in string umwandeln
+                
+                print(f"\n[UDP] Verbindungsanfrage von {peer_name}. Baue TCP auf zu Port {peer_tcp_port}...")
+                
+                # Anvisierte(Zielperson) baut die TCP-Verbindung zum Initiator(Anrufer) auf
+                try:
+                    p2p_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) #IPv4 Adressen
+                    p2p_sock.connect((addr[0], peer_tcp_port))
+                    
+                    p2p_sessions[peer_name] = p2p_sock
+                    
+                    # Thread zum Empfangen der Chat-Nachrichten starten
+                    t = threading.Thread(target=receive_p2p_messages, args=(p2p_sock, peer_name))
+                    t.daemon = True
+                    t.start()
+                    
+                    # UDP-Antwort zurücksenden (Success)
+                    reply = struct.pack("!BBH", 4, 0, assigned_tcp_port) #Message Type 4, Errorcode 0 (Erfolg)
+                    udp_server.sendto(reply, addr)
+                except Exception as e:
+                    print(f"TCP-Verbindungsaufbau fehlgeschlagen: {e}")
+                    reply = struct.pack("!BBH", 4, 1, 0)
+                    udp_server.sendto(reply, addr)
+                    
+        except Exception as e:
+            print(f"Fehler im UDP-Listener: {e}")
+
+# P2P Verbindung aktiv initiieren
+def initiate_p2p(target_ip, target_udp_port):
+    # Erstelle einen temporären TCP-Socket
+    temp_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    temp_tcp.bind(("0.0.0.0", 0))
+    temp_tcp.listen(1)
+    my_open_tcp_port = temp_tcp.getsockname()[1]
+    
+    # UDP-Anfrage senden (Type 4)
+    udp_client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    packet = struct.pack("!B32sH", 4, pad_string(MY_NICKNAME, 32), my_open_tcp_port)
+    udp_client.sendto(packet, (target_ip, target_udp_port))
+    print(f"UDP-Anfrage an {target_ip}:{target_udp_port} gesendet. Warte auf TCP-Verbindung...")
+    
+    # Partner sollte sich jetzt via TCP melden
+    temp_tcp.settimeout(5.0)
+    try:
+        peer_sock, addr = temp_tcp.accept()
+        print(f"P2P TCP-Verbindung erfolgreich hergestellt!")
+        
+        # In Sessions speichern
+        p2p_sessions["Target"] = peer_sock
+        t = threading.Thread(target=receive_p2p_messages, args=(peer_sock, "Target"))
+        t.daemon = True
+        t.start()
+    except socket.timeout:
+        print("Timeout: Partner hat keine TCP-Verbindung aufgebaut.")
+    finally:
+        temp_tcp.close()
+
+# Hauptprogramm
+def main():
+    global MY_NICKNAME, MY_UDP_PORT, MY_IP, SERVER_IP #muss global, da anderen Threads (UDP-Thread) später auch darauf zugreifen können
+    
+    MY_NICKNAME = input("Nickname eingeben: ")
+    MY_UDP_PORT = int(input("Eigener UDP-Port: "))
+    MY_IP = input("Eigene IP (testen 127.0.0.1): ")
+    SERVER_IP = input("Server IP (testen 127.0.0.1): ")
+    
+    # 1. UDP-Listener Thread starten
+    udp_thread = threading.Thread(target=listen_for_p2p_udp, args=(MY_UDP_PORT,))
+    udp_thread.daemon = True # Hintergrund Thread (hat kein Eigenleben, sobald Hauptprogramm schließt oder Strg + C , killt alle Daemon-Threads sofort und automatisch mit
+    udp_thread.start()
+    
+    # 2. Verbindung zum Server (50000) aufbauen (TCP)
+    server_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        server_tcp.connect((SERVER_IP, SERVER_PORT))
+    except Exception as e:
+        print(f"Konnte nicht mit Server verbinden: {e}")
+        return
+    
+    # 3. Registrierungs Nachricht an Server senden (Type 0)
+    # Format: Type(1B), IP(4B), UDP-Port(2B), Nickname(32B)
+    packed_ip = socket.inet_aton(MY_IP) #Macht aus dem String "127.0.0.1" genau 4 Bytes
+    reg_packet = struct.pack("!B4sH32s", 0, packed_ip, MY_UDP_PORT, pad_string(MY_NICKNAME, 32)) #!: Datenpakete auf allen BS gleich interpretiert, B einzelens Byte für Message Type, 4s string aus 4B für IP, H usigned Short 2B für Portnr, 32s string 32B für name =39B
+    # 0-> Message Type (1B), packedIP -> 4B IP, M<Udpport -> port (2B), padString -> macht namen genau 32B lang s protc_helpers
+    server_tcp.sendall(reg_packet)
+    
+    # Server-Antwort (Userliste) auswerten
+    header = server_tcp.recv(6) #6B : 1B Type + 1B Error Code + 4B Integer I für die Anzahl der Nutzer N
+    msg_type, error, n_users = struct.unpack("!BBI", header) #zerlegt 6B wieder in Variablen
+    print(f"Am Server registriert. Anzahl anderer Nutzer: {n_users}")
+    
+    # Userliste einlesen
+    for _ in range(n_users):
+        user_data = server_tcp.recv(38) # 38B : Listeintrag (4B IP + 2B Port + 32B Name)
+        raw_ip, u_port, raw_name = struct.unpack("!4sH32s", user_data)
+        print(f" -> User: {unpad_string(raw_name)} | IP: {socket.inet_ntoa(raw_ip)} | UDP-Port: {u_port}") #wandelt die 4 Bytes wieder in einen Text um s protc_helpers
+        
+    # Thread für Server-Updates starten
+    server_thread = threading.Thread(target=receive_from_server, args=(server_tcp,))
+    #receive_from_server übernimmt im Hintergrund das Abhören des Server-Sockets
+    server_thread.daemon = True
+    server_thread.start()
+    
+    # 4. Benutzerschleife für Eingaben
+    time.sleep(1)
+    print("\nBefehle:\n/b <text>  -> Broadcast senden\n/p2p <ip> <udp_port> -> P2P Session starten\n/msg <text> -> Nachricht an P2P-Partner senden\n")
+    
+    while True:
+        cmd = input("> ")
+        if cmd.startswith("/b "):
+            msg_text = cmd[3:] #cmd[3:] schneidet das /b
+            # Broadcast senden (Type 3)
+            packet = struct.pack("!B32s256s", 3, pad_string(MY_NICKNAME, 32), pad_string(msg_text, 256)) #baut ein Paket mit Message Type 3, Namen (32B) und Nachricht (256B)
+            server_tcp.sendall(packet)
+            
+        elif cmd.startswith("/p2p "):
+            parts = cmd.split() #zerlegt Text an den Leerzeichen in eine Liste: zb ['/p2p', '192.168.1.50', '60002']
+            if len(parts) == 3: #drei Argumente übergeben?
+                initiate_p2p(parts[1], int(parts[2])) #übergibt IP und port 
+                
+        elif cmd.startswith("/msg "):
+            msg_text = cmd[5:]
+            if "Target" in p2p_sessions: #P2P-TCP-Verbindung zu Partner  in Speicher?
+                # Chat Nachricht senden (Type 5)
+                packet = struct.pack("!B256s", 5, pad_string(msg_text, 256)) #5 Message Type für P2P Nachrichten(1B), 256B nachricht
+                p2p_sessions["Target"].sendall(packet) #Nachricht wird über den Direkt-Socket gesendet
+            else:
+                print(" Keine aktive P2P-Session vorhanden. Nutze erst /p2p")
+
+if __name__ == "__main__":
+    main()
